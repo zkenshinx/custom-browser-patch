@@ -1,0 +1,144 @@
+diff --git a/content/handlers/html/html.c b/content/handlers/html/html.c
+index f92985b04..937d685ba 100644
+--- a/content/handlers/html/html.c
++++ b/content/handlers/html/html.c
+@@ -338,6 +338,128 @@ static void html_get_dimensions(html_content *htmlc)
+ }
+ 
+ /* exported function documented in html/html_internal.h */
++/**
++ * Inject a "Hello searchapi" banner as the first child of the document body.
++ *
++ * Demonstration patch: makes a visible marker appear at the top of every
++ * rendered page by manipulating the freshly parsed DOM before it is turned
++ * into a box tree.  Mirrors the libdom node-building pattern used by
++ * html_exec().  Any failure is logged and ignored so page load is unaffected.
++ */
++#define NS_BANNER_LIT(s) (const uint8_t *)(s), (sizeof(s) - 1)
++static void html_insert_searchapi_banner(html_content *htmlc)
++{
++	dom_exception err;
++	dom_html_body_element *body_node = NULL;
++	dom_node *first_child = NULL;
++	dom_node *spare_node = NULL;
++	dom_element *div_node = NULL;
++	dom_text *text_node = NULL;
++	dom_string *tag_name = NULL;
++	dom_string *style_name = NULL;
++	dom_string *style_val = NULL;
++	dom_string *banner_text = NULL;
++
++	if (htmlc->document == NULL) {
++		return;
++	}
++
++	err = dom_html_document_get_body(htmlc->document, &body_node);
++	if ((err != DOM_NO_ERR) || (body_node == NULL)) {
++		NSLOG(netsurf, INFO, "searchapi banner: no body element");
++		return;
++	}
++
++	/* <div> element to hold the banner */
++	err = dom_string_create(NS_BANNER_LIT("div"), &tag_name);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	err = dom_document_create_element(htmlc->document, tag_name, &div_node);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++
++	/* inline style so it clearly reads as a banner */
++	err = dom_string_create(NS_BANNER_LIT("style"), &style_name);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	err = dom_string_create(NS_BANNER_LIT(
++			"background:#ffd400;color:#000;"
++			"font:bold 16px sans-serif;padding:8px;"
++			"text-align:center;border-bottom:2px solid #000"),
++			&style_val);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	(void) dom_element_set_attribute(div_node, style_name, style_val);
++
++	/* text content of the banner */
++	err = dom_string_create(NS_BANNER_LIT("Hello searchapi \xF0\x9F\x90\xA6"),
++			&banner_text);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	err = dom_document_create_text_node(htmlc->document, banner_text,
++			&text_node);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	err = dom_node_append_child(div_node, text_node, &spare_node);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	dom_node_unref(spare_node);
++	spare_node = NULL;
++
++	/* insert the banner as the first thing in the body */
++	err = dom_node_get_first_child(body_node, &first_child);
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	if (first_child != NULL) {
++		err = dom_node_insert_before(body_node, div_node, first_child,
++				&spare_node);
++	} else {
++		err = dom_node_append_child(body_node, div_node, &spare_node);
++	}
++	if (err != DOM_NO_ERR) {
++		goto out;
++	}
++	dom_node_unref(spare_node);
++	spare_node = NULL;
++
++	NSLOG(netsurf, INFO, "searchapi banner: injected into page");
++
++out:
++	if (first_child != NULL) {
++		dom_node_unref(first_child);
++	}
++	if (banner_text != NULL) {
++		dom_string_unref(banner_text);
++	}
++	if (style_val != NULL) {
++		dom_string_unref(style_val);
++	}
++	if (style_name != NULL) {
++		dom_string_unref(style_name);
++	}
++	if (tag_name != NULL) {
++		dom_string_unref(tag_name);
++	}
++	if (text_node != NULL) {
++		dom_node_unref(text_node);
++	}
++	if (div_node != NULL) {
++		dom_node_unref(div_node);
++	}
++	if (body_node != NULL) {
++		dom_node_unref(body_node);
++	}
++}
++#undef NS_BANNER_LIT
++
+ void html_finish_conversion(html_content *htmlc)
+ {
+ 	union content_msg_data msg_data;
+@@ -376,6 +498,10 @@ void html_finish_conversion(html_content *htmlc)
+ 		return;
+ 	}
+ 
++	/* inject the "Hello searchapi" demo banner into the parsed DOM
++	 * before it is converted to a box tree so it renders on the page */
++	html_insert_searchapi_banner(htmlc);
++
+ 
+ 	/* fire a simple event named load at the Document's Window
+ 	 * object, but with its target set to the Document object (and
